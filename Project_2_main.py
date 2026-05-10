@@ -8,6 +8,8 @@ import os
 import joblib
 
 
+
+# ----------------------------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------------
 # Code Content:
 # 1. Loading the data and adding Gene Symbol and Metadata
@@ -15,11 +17,12 @@ import joblib
 #    1.2. Arranging the Metadata
 #    1.3. Arranging The RNA-seq data (for LUSC and LUAD)
 #    1.4. Gene Annotation
-#    1.5. Preparing X and y
+# 2. Cleaning Organizing and Normalizing the Data
+#    2.1. get rid of Duplicated:
+#    2.2. filter low-count genes (noise removal)
 
-# * This part already done in project 1 ( as a validation data)
 # ----------------------------------------------------------------------------------------------------------------------
-
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 
@@ -27,6 +30,7 @@ import joblib
 # 1Loading the data and adding Gene Symbol and Meta data--------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------------------------
 
+# * This part already done in project 1 ( as a validation data)
 # The Training Data:
 # The TCGA–GTEx (TOIL recompute) dataset is a large-scale RNA-seq compendium combining tumor samples from TCGA with
 # normal tissue samples from the GTEx project, all processed through a unified TOIL pipeline. In this study, only
@@ -35,14 +39,12 @@ import joblib
 # This dataset served as an external validation cohort, enabling assessment of model generalization across independent
 # sources while accounting for potential batch effects between TCGA and GTEx.TCGA
 
-
 # 1.1. Download file ---------------------------------------------------------------------------------------------------
 # https://xenabrowser.net/datapages/?dataset=TcgaTargetGtex_rsem_gene_tpm&host=https%3A%2F%2Ftoil.xenahubs.net&removeHub=https%3A%2F%2Fxena.treehouse.gi.ucsc.edu%3A443
 # I downloaded three files:
 # 1. Phenotype: https://toil-xena-hub.s3.us-east-1.amazonaws.com/download/TcgaTargetGTEX_phenotype.txt.gz; Full metadata
 # 2. Data: TCGA TARGET GTEx : https://toil-xena-hub.s3.us-east-1.amazonaws.com/download/TcgaTargetGtex_rsem_gene_tpm.gz; Full metadata
 # 3. Annotation: https://toil-xena-hub.s3.us-east-1.amazonaws.com/download/probeMap%2Fgencode.v23.annotation.gene.probemap; Full metadata
-
 
 # 1.2. Arranging the Metadata ------------------------------------------------------------------------------------------
 # I am starting from the metadata becuse the data contains many cancer type I don't need and I want to know which to filter
@@ -75,7 +77,6 @@ cols = pd.read_csv(  #get column names
     sep="\t",
     nrows=0)
 
-
 #  1.3. Arranging The RNA-seq data (for LUSC and LUAD) -----------------------------------------------------------------
 cols_to_use = ['sample'] + [c for c in cols if c in sample_ids]
 data = pd.read_csv(  #get the data ( only for Lung cancer)
@@ -84,7 +85,6 @@ data = pd.read_csv(  #get the data ( only for Lung cancer)
     usecols=cols_to_use)
 print(data)
 data = data.set_index('sample')
-
 
 # 1.4. Gene Annotation -------------------------------------------------------------------------------------------------
 data.index = data.index.str.split('.').str[0]  # remove version suffix
@@ -97,10 +97,32 @@ annot_clean['id'] = annot_clean['id'].str.split('.').str[0]
 data_merge = data.merge(annot_clean, left_index=True, right_on='id', how='inner')
 data_merge =data_merge.drop('id', axis=1)
 data_merge = data_merge.set_index('gene')
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# 2. Cleaning Organizing and Normalizing the Data: ---------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+# 2.1. get rid of Duplicated:
 data_merge = data_merge.groupby(data_merge.index).mean()
 
-# 1.5. Preparing X and y -----------------------------------------------------------------------------------------------
-X = data_merge.T
+# 2.2. filter low-count genes (noise removal)
+# This is a log2(TPM+0.001)
+# my floor ( the actual zero) is about -10:
+
+print(data_merge.min().min())
+print(data_merge.max().max())
+print(data_merge.mean().mean())
+data_merge.stack().hist(bins=100)
+plt.show()
+
+# Filter low-expression genes
+floor = -9.9658
+min_samples = int(0.2 * data_merge.shape[1])
+total_sum_genes = (data_merge > -5).sum(axis=1)
+keep = total_sum_genes >= min_samples
+data_merge_filtered = data_merge.loc[keep]
+
+X = data_merge_filtered.T
 y = pheno_TCGA.set_index('sample').loc[X.index, 'label']
 print(X.shape)
 print(y.shape)
